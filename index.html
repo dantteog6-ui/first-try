@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>1:1 온라인 오목2 (2자리 코드)</title>
+    <title>1:1 온라인 오목2</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -88,7 +88,6 @@
 
     <h1>1:1 온라인 오목</h1>
 
-    <!-- 방 만들기 / 들어가기 선택 화면 -->
     <div id="setup-box">
         <p style="font-size: 0.95rem; color: #ccc;">2자리 방 코드를 입력하세요</p>
         <input type="text" id="roomCodeInput" placeholder="예: 12" maxlength="4" value="12">
@@ -98,7 +97,6 @@
         </div>
     </div>
 
-    <!-- 오목 게임 화면 -->
     <div id="game-container">
         <div id="status">연결 중...</div>
         <canvas id="board" width="450" height="450"></canvas>
@@ -117,7 +115,27 @@
         const ctx = canvas.getContext('2d');
         const CELL_SIZE = canvas.width / BOARD_SIZE;
 
-        // 1. 방을 만드는 사람 (호스트)
+        // 방화벽 우회를 위한 STUN/TURN 서버 설정
+        const peerConfig = {
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    {
+                        urls: 'turn:openrelay.metered.ca:80',
+                        username: 'openrelay',
+                        credential: 'openrelay'
+                    },
+                    {
+                        urls: 'turn:openrelay.metered.ca:443',
+                        username: 'openrelay',
+                        credential: 'openrelay'
+                    }
+                ]
+            }
+        };
+
+        // 1. 방 만들기 (호스트)
         function startHosting() {
             const code = document.getElementById('roomCodeInput').value.trim();
             if (!code) { alert("코드를 입력해주세요!"); return; }
@@ -127,16 +145,16 @@
             statusDiv.innerText = `[${code}]번 방 생성 중...`;
 
             const hostId = "omok-room-" + code;
-            peer = new Peer(hostId);
+            peer = new Peer(hostId, peerConfig);
 
             peer.on('open', () => {
                 statusDiv.innerText = `[${code}]번 방 생성 완료! 상대방 입장을 기다리는 중...`;
-                isMyColorBlack = true; // 호스트는 흑돌
+                isMyColorBlack = true;
             });
 
             peer.on('error', (err) => {
                 if (err.type === 'unavailable-id') {
-                    alert("이미 누구나 사용 중인 방 번호입니다. 다른 번호를 입력해 주세요!");
+                    alert("이미 사용 중인 방 번호입니다. 다른 번호를 입력해 주세요!");
                     location.reload();
                 } else {
                     statusDiv.innerText = "오류 발생: " + err.type;
@@ -146,13 +164,13 @@
             peer.on('connection', (connection) => {
                 conn = connection;
                 setupConnection();
-                myTurn = true; // 호스트 선공
+                myTurn = true;
                 gameActive = true;
                 statusDiv.innerText = "상대방 입장 완료! 게임 시작 (당신은 흑돌)";
             });
         }
 
-        // 2. 방에 들어가는 사람 (게스트)
+        // 2. 방 들어가기 (게스트)
         function startJoining() {
             const code = document.getElementById('roomCodeInput').value.trim();
             if (!code) { alert("코드를 입력해주세요!"); return; }
@@ -161,12 +179,12 @@
             const statusDiv = document.getElementById('status');
             statusDiv.innerText = `[${code}]번 방에 접속하는 중...`;
 
-            peer = new Peer(); // 게스트는 임의의 ID로 접속
+            peer = new Peer(peerConfig);
             const hostId = "omok-room-" + code;
 
             peer.on('open', () => {
-                conn = peer.connect(hostId);
-                isMyColorBlack = false; // 게스트는 백돌
+                conn = peer.connect(hostId, { reliable: true });
+                isMyColorBlack = false;
                 setupConnection();
             });
 
@@ -187,7 +205,7 @@
             conn.on('open', () => {
                 gameActive = true;
                 if (!isMyColorBlack) {
-                    statusDiv.innerText = "방 입장 성공! 상대방 턴을 기다리는 중 (당신은 백돌)";
+                    statusDiv.innerText = "방 입장 성공! 상대방 턴 대기 중 (당신은 백돌)";
                     myTurn = false;
                 }
                 drawBoard();
