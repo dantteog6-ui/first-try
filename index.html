@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1:1 온라인 오목 (PeerJS P2P)</title>
+    <!-- PeerJS 라이브러리 (서버 없는 P2P 실시간 통신) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            background: #1e1e24;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px 10px;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #eac066;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        /* 로비 / 대기실 메뉴 */
+        #menu-container {
+            background: #2b2b36;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+        }
+
+        .menu-box {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            padding: 12px;
+            font-size: 1rem;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #1a1a22;
+            color: #fff;
+            text-align: center;
+            outline: none;
+        }
+        input[type="text"]:focus {
+            border-color: #eac066;
+        }
+
+        button {
+            padding: 12px;
+            font-size: 1rem;
+            font-weight: bold;
+            background: #eac066;
+            color: #1e1e24;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        button:hover {
+            background: #d4ab52;
+            transform: translateY(-1px);
+        }
+
+        .divider {
+            height: 1px;
+            background: #444;
+            margin: 15px 0;
+        }
+
+        #my-id-box {
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a22;
+            border-radius: 6px;
+            word-break: break-all;
+            font-size: 0.9rem;
+            color: #4da6ff;
+            display: none;
+        }
+
+        /* 게임 메인 UI (게임판 + 채팅) */
+        #game-ui {
+            display: none;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        #status-bar {
+            background: #2b2b36;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .game-layout {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        /* 오목판 스타일 (15x15) */
+        #board-wrapper {
+            position: relative;
+            background: #eac066;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(15, 32px);
+            grid-template-rows: repeat(15, 32px);
+            gap: 0;
+            background: #000; /* 격자선 색상 */
+            border: 1px solid #000;
+        }
+
+        .cell {
+            width: 32px;
+            height: 32px;
+            background: #eac066;
+            border: 1px solid #c8a24d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .cell:hover {
+            background: #f0cc78;
+        }
+
+        /* 오목 돌 */
+        .stone {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.4);
+            position: relative;
+            z-index: 2;
+        }
+        .stone.black {
+            background: radial-gradient(circle at 30% 30%, #666, #000);
+        }
+        .stone.white {
+            background: radial-gradient(circle at 30% 30%, #fff, #ccc);
+        }
+
+        /* 마지막 둔 위치 표시 마커 */
+        .last-move-marker {
+            width: 8px;
+            height: 8px;
+            background: red;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 3;
+        }
+
+        /* 채팅 & 반응 이모지 패널 */
+        #side-panel {
+            flex: 1;
+            min-width: 280px;
+            max-width: 350px;
+            background: #2b2b36;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            height: 520px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+
+        #emoji-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            justify-content: space-around;
+        }
+        .emoji-btn {
+            font-size: 1.4rem;
+            background: #1a1a22;
+            border: none;
+            padding: 6px;
+            border-radius: 6px;
+            cursor: pointer;
+            flex: 1;
+        }
+        .emoji-btn:hover {
+            background: #3b3b4a;
+        }
+
+        #chat-messages {
+            flex: 1;
+            background: #1a1a22;
+            border-radius: 6px;
+            padding: 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .chat-msg {
+            padding: 6px 10px;
+            border-radius: 6px;
+            max-width: 80%;
+            word-break: break-all;
+        }
+        .chat-msg.me {
+            background: #4da6ff;
+            color: #fff;
+            align-self: flex-end;
+        }
+        .chat-msg.other {
+            background: #3b3b4a;
+            color: #fff;
+            align-self: flex-start;
+        }
+        .chat-msg.system {
+            background: transparent;
+            color: #888;
+            font-size: 0.8rem;
+            text-align: center;
+            align-self: center;
+        }
+
+        #chat-input-box {
+            display: flex;
+            gap: 8px;
+        }
+        #chat-input-box input {
+            flex: 1;
+            text-align: left;
+            padding: 8px;
+        }
+        #chat-input-box button {
+            padding: 8px 15px;
+        }
+
+        /* 화면에 떠오르는 이모지 애니메이션 */
+        .floating-emoji {
+            position: absolute;
+            font-size: 2.5rem;
+            pointer-events: none;
+            animation: floatUp 1.5s ease-out forwards;
+            z-index: 10;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-80px) scale(1.3); }
+        }
+
+        /* 승리 모달 popup */
+        #win-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.7);
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal-content {
+            background: #2b2b36;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .modal-content h2 {
+            font-size: 2rem;
+            color: #eac066;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>1:1 온라인 오목 (WebRTC P2P)</h1>
+
+    <!-- 로비 메뉴 -->
+    <div id="menu-container">
+        <div class="menu-box">
+            <button onclick="createRoom()">방 만들기 (흑돌 / 선공)</button>
+            <div id="my-id-box"></div>
+        </div>
+        
+        <div class="divider"></div>
+
+        <div class="menu-box">
+            <input type="text" id="room-id-input" placeholder="친구의 방 코드 입력">
+            <button onclick="joinRoom()">입장하기 (백돌 / 후공)</button>
+        </div>
+    </div>
+
+    <!-- 게임 화면 UI -->
+    <div id="game-ui">
+        <div id="status-bar">상대방 접속을 기다리는 중...</div>
+        
+        <div class="game-layout">
+            <!-- 15x15 오목판 -->
+            <div id="board-wrapper">
+                <div id="board"></div>
+            </div>
+
+            <!-- 사이드바 (채팅 & 반응 이모지) -->
+            <div id="side-panel">
+                <div id="emoji-bar">
+                    <button class="emoji-btn" onclick="sendEmoji('👏')">👏</button>
+                    <button class="emoji-btn" onclick="sendEmoji('🔥')">🔥</button>
+                    <button class="emoji-btn" onclick="sendEmoji('😱')">😱</button>
+                    <button class="emoji-btn" onclick="sendEmoji('🤔')">🤔</button>
+                    <button class="emoji-btn" onclick="sendEmoji('😂')">😂</button>
+                </div>
+                <div id="chat-messages">
+                    <div class="chat-msg system">대국실에 입장했습니다.</div>
+                </div>
+                <div id="chat-input-box">
+                    <input type="text" id="chat-input" placeholder="메시지 입력..." onkeydown="if(event.key==='Enter') sendChat()">
+                    <button onclick="sendChat()">전송</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 승리/패배 모달 팝업 -->
+    <div id="win-modal">
+        <div class="modal-content">
+            <h2 id="win-title">승리!</h2>
+            <p id="win-desc" style="margin-bottom: 20px; color: #ccc;"></p>
+            <button onclick="location.reload()">새 게임 하기</button>
+        </div>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 15;
+        let peer, conn;
+        let isMyTurn = false;
+        let myColor = ""; // 'black' 또는 'white'
+        let boardState = Array(BOARD_SIZE * BOARD_SIZE).fill(null);
+        let lastMoveIndex = null;
+        let isGameOver = false;
+
+        // 1. 방 만들기 (방장 = 흑돌 / 선공)
+        function createRoom() {
+            peer = new Peer();
+            myColor = "black";
+            isMyTurn = true; // 흑돌 선공
+
+            peer.on('open', (id) => {
+                const idBox = document.getElementById("my-id-box");
+                idBox.style.display = "block";
+                idBox.innerText = `내 방 코드: ${id}\n(이 코드를 친구에게 공유하세요)`;
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnection();
+                startGameUI();
+            });
+        }
+
+        // 2. 방 입장하기 (참가자 = 백돌 / 후공)
+        function joinRoom() {
+            const roomId = document.getElementById("room-id-input").value.trim();
+            if (!roomId) return alert("방 코드를 입력해주세요!");
+
+            peer = new Peer();
+            myColor = "white";
+            isMyTurn = false; // 백돌 후공
+
+            peer.on('open', () => {
+                conn = peer.connect(roomId);
+                setupConnection();
+                startGameUI();
+            });
+        }
+
+        function startGameUI() {
+            document.getElementById("menu-container").style.display = "none";
+            document.getElementById("game-ui").style.display = "block";
+            initBoard();
+            updateStatusBar();
+        }
+
+        // 3. PeerJS 데이터 통신 설정
+        function setupConnection() {
+            conn.on('open', () => {
+                addSystemChat("상대방과 성공적으로 연결되었습니다!");
+                updateStatusBar();
+            });
+
+            conn.on('data', (data) => {
+                if (data.type === 'move') {
+                    // 상대방 착수 수신
+                    handleReceiveMove(data.index, data.color);
+                } else if (data.type === 'chat') {
+                    // 채팅 수신
+                    addChat(data.message, 'other');
+                } else if (data.type === 'emoji') {
+                    // 이모지 수신
+                    showFloatingEmoji(data.emoji);
+                }
+            });
+
+            conn.on('close', () => {
+                alert("상대방과의 연결이 끊어졌습니다.");
+                location.reload();
+            });
+        }
+
+        // 4. 오목판 격자 초기화
+        function initBoard() {
+            const boardDiv = document.getElementById("board");
+            boardDiv.innerHTML = "";
+
+            for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+                const cell = document.createElement("div");
+                cell.classList.add("cell");
+                cell.dataset.index = i;
+                cell.onclick = () => handleCellClick(i);
+                boardDiv.appendChild(cell);
+            }
+        }
+
+        // 5. 칸 클릭 (내가 돌을 둘 때)
+        function handleCellClick(index) {
+            if (isGameOver) return;
+            if (!isMyTurn) return alert("상대방 차례입니다!");
+            if (boardState[index] !== null) return alert("이미 돌이 놓여진 자리입니다!");
+
+            // 착수 처리
+            placeStone(index, myColor);
+            conn.send({ type: 'move', index: index, color: myColor });
+
+            // 5목 승리 체크
+            if (checkWin(index, myColor)) {
+                endGame(true);
+                return;
+            }
+
+            isMyTurn = false;
+            updateStatusBar();
+        }
+
+        // 6. 상대방 착수 처리
+        function handleReceiveMove(index, color) {
+            placeStone(index, color);
+
+            // 상대방 승리 체크
+            if (checkWin(index, color)) {
+                endGame(false);
+                return;
+            }
+
+            isMyTurn = true;
+            updateStatusBar();
+        }
+
+        // 돌 배치 및 화면 렌더링
+        function placeStone(index, color) {
+            boardState[index] = color;
+            lastMoveIndex = index;
+
+            const cells = document.querySelectorAll(".cell");
+            const cell = cells[index];
+
+            // 기존 마커 제거
+            document.querySelectorAll(".last-move-marker").forEach(m => m.remove());
+
+            // 돌 객체 생성
+            const stone = document.createElement("div");
+            stone.classList.add("stone", color);
+            cell.appendChild(stone);
+
+            // 마지막 착수 빨간 점 마커 생성
+            const marker = document.createElement("div");
+            marker.classList.add("last-move-marker");
+            cell.appendChild(marker);
+        }
+
+        // 7. 5목 승리 판정 알고리즘 (가로, 세로, 대각선 2방향)
+        function checkWin(index, color) {
+            const row = Math.floor(index / BOARD_SIZE);
+            const col = index % BOARD_SIZE;
+
+            const directions = [
+                [0, 1],  // 가로
+                [1, 0],  // 세로
+                [1, 1],  // 대각선 ↘
+                [1, -1]  // 대각선 ↙
+            ];
+
+            for (let [dr, dc] of directions) {
+                let count = 1;
+
+                // 정방향 탐색
+                for (let i = 1; i < 5; i++) {
+                    let r = row + dr * i;
+                    let c = col + dc * i;
+                    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+                    if (boardState[r * BOARD_SIZE + c] === color) count++;
+                    else break;
+                }
+
+                // 역방향 탐색
+                for (let i = 1; i < 5; i++) {
+                    let r = row - dr * i;
+                    let c = col - dc * i;
+                    if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+                    if (boardState[r * BOARD_SIZE + c] === color) count++;
+                    else break;
+                }
+
+                if (count >= 5) return true;
+            }
+            return false;
+        }
+
+        // 8. 상태 표시 바 업데이트
+        function updateStatusBar() {
+            const statusBar = document.getElementById("status-bar");
+            if (isMyTurn) {
+                statusBar.innerText = `🟢 내 차례입니다 (${myColor === 'black' ? '흑돌' : '백돌'})`;
+                statusBar.style.color = "#4da6ff";
+            } else {
+                statusBar.innerText = `⏳ 상대방이 생각 중입니다... (${myColor === 'black' ? '백돌' : '흑돌'})`;
+                statusBar.style.color = "#ff6b6b";
+            }
+        }
+
+        // 9. 게임 종료 처리 (모달 띄우기)
+        function endGame(isWin) {
+            isGameOver = true;
+            const modal = document.getElementById("win-modal");
+            const title = document.getElementById("win-title");
+            const desc = document.getElementById("win-desc");
+
+            modal.style.display = "flex";
+            if (isWin) {
+                title.innerText = "🎉 승리했습니다!";
+                title.style.color = "#4da6ff";
+                desc.innerText = "멋진 전략으로 5목을 먼저 완성했습니다!";
+            } else {
+                title.innerText = "💀 패배했습니다...";
+                title.style.color = "#ff6b6b";
+                desc.innerText = "상대방이 5목을 먼저 완성했습니다.";
+            }
+        }
+
+        // 10. 실시간 채팅 기능
+        function sendChat() {
+            const input = document.getElementById("chat-input");
+            const message = input.value.trim();
+            if (!message || !conn) return;
+
+            addChat(message, 'me');
+            conn.send({ type: 'chat', message: message });
+            input.value = "";
+        }
+
+        function addChat(msg, sender) {
+            const chatBox = document.getElementById("chat-messages");
+            const div = document.createElement("div");
+            div.classList.add("chat-msg", sender);
+            div.innerText = msg;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function addSystemChat(msg) {
+            addChat(msg, 'system');
+        }
+
+        // 11. 반응 이모지 전송 & 팝업 애니메이션
+        function sendEmoji(emoji) {
+            if (!conn) return;
+            showFloatingEmoji(emoji);
+            conn.send({ type: 'emoji', emoji: emoji });
+        }
+
+        function showFloatingEmoji(emoji) {
+            const boardWrapper = document.getElementById("board-wrapper");
+            const el = document.createElement("div");
+            el.classList.add("floating-emoji");
+            el.innerText = emoji;
+            
+            // 오목판 임의 위치에 띄우기
+            el.style.left = `${Math.random() * 70 + 15}%`;
+            el.style.top = `${Math.random() * 50 + 25}%`;
+
+            boardWrapper.appendChild(el);
+            setTimeout(() => el.remove(), 1500);
+        }
+    </script>
+</body>
+</html>
