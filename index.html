@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>1:1 온라인 오목 (2자리 코드)</title>
-    <!-- PeerJS 라이브러리 -->
+    <title>1:1 온라인 오목</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,14 +14,54 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             min-height: 100vh;
             padding: 20px 10px;
         }
         h1 {
             font-size: 1.8rem;
-            margin-bottom: 10px;
+            margin-bottom: 20px;
             color: #eac066;
             text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        #setup-box {
+            background: #2a2a35;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 300px;
+        }
+        input {
+            padding: 12px;
+            font-size: 1.2rem;
+            text-align: center;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #1e1e24;
+            color: #fff;
+            outline: none;
+        }
+        button {
+            background: #eac066;
+            color: #1e1e24;
+            border: none;
+            padding: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            transition: background 0.2s;
+        }
+        button:hover { background: #f1cca3; }
+        #game-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
         }
         #status {
             font-size: 1.1rem;
@@ -38,95 +77,85 @@
             cursor: pointer;
             border-radius: 4px;
         }
-        .btn-box {
-            margin-top: 15px;
-        }
-        button {
-            background: #eac066;
-            color: #1e1e24;
-            border: none;
-            padding: 10px 20px;
-            font-size: 1rem;
-            font-weight: bold;
-            border-radius: 5px;
-            cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            transition: background 0.2s;
-        }
-        button:hover {
-            background: #f1cca3;
-        }
     </style>
 </head>
 <body>
 
     <h1>1:1 온라인 오목</h1>
-    <div id="status">방에 접속하는 중...</div>
-    <canvas id="board" width="450" height="450"></canvas>
-    
-    <div class="btn-box">
-        <button onclick="location.reload()">방 다시 만들기 / 재접속</button>
+
+    <!-- 첫 접속 시 2자리 코드 입력 화면 -->
+    <div id="setup-box">
+        <p style="font-size: 0.95rem; color: #ccc;">사용할 2자리 코드를 입력하세요</p>
+        <input type="text" id="roomCodeInput" placeholder="예: 12" maxlength="4">
+        <button onclick="joinGame()">방 들어가기 / 만들기</button>
+    </div>
+
+    <!-- 게임판 화면 (처동엔 숨김) -->
+    <div id="game-container">
+        <div id="status">연결 중...</div>
+        <canvas id="board" width="450" height="450"></canvas>
     </div>
 
     <script>
-        // 1. 접속 시 2자리 방 코드 입력받기
-        let inputCode = prompt("사용할 2자리 방 코드를 입력하세요 (예: 12, 99):", "12");
-        if (!inputCode) inputCode = "12";
-        
-        // 고유 ID 충돌 방지를 위해 앞에 접두사 붙임 (예: omok-12)
-        const myId = "omok-" + inputCode.trim();
-        
-        const statusDiv = document.getElementById('status');
-        const canvas = document.getElementById('board');
-        const ctx = canvas.getContext('2d');
-
-        const BOARD_SIZE = 15;
-        const CELL_SIZE = canvas.width / BOARD_SIZE;
-        
-        let board = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
-        let myTurn = false; // 내가 흑돌(선공)이면 true, 백돌이면 false
-        let isMyColorBlack = false; 
+        let peer, conn;
+        let board = Array(15).fill(null).map(() => Array(15).fill(0));
+        let myTurn = false;
+        let isMyColorBlack = false;
         let gameActive = false;
 
-        // PeerJS 연결 생성
-        const peer = new Peer(myId);
-        let conn = null;
+        const BOARD_SIZE = 15;
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const CELL_SIZE = canvas.width / BOARD_SIZE;
 
-        peer.on('open', (id) => {
-            statusDiv.innerText = `방 코드 [${inputCode}] 생성 완료! 상대방 접속을 기다리는 중...`;
-            isMyColorBlack = true; // 먼저 방을 파는 사람이 흑돌
-        });
-
-        peer.on('error', (err) => {
-            if (err.type === 'unavailable-id') {
-                // 이미 누군가 이 방 코드를 쓰고 있다면 -> 게스트(참가자)로 접속 시도
-                statusDiv.innerText = `방 코드 [${inputCode}]에 접속 시도 중...`;
-                connectToPeer(myId);
-            } else {
-                statusDiv.innerText = "연결 오류 발생: " + err.type;
+        function joinGame() {
+            const code = document.getElementById('roomCodeInput').value.trim();
+            if (!code) {
+                alert("2자리 코드를 입력해주세요!");
+                return;
             }
-        });
 
-        function connectToPeer(targetId) {
-            conn = peer.connect(targetId);
-            setupConnection();
+            // 화면 전환
+            document.getElementById('setup-box').style.display = 'none';
+            document.getElementById('game-container').style.display = 'flex';
+            const statusDiv = document.getElementById('status');
+
+            const myId = "omok-" + code;
+            peer = new Peer(myId);
+
+            peer.on('open', (id) => {
+                statusDiv.innerText = `[${code}]번 방 생성 완료! 상대방 접속 대기 중...`;
+                isMyColorBlack = true; // 먼저 방 판 사람이 흑돌
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    // 이미 방이 있으면 게스트로 접속
+                    statusDiv.innerText = `[${code}]번 방에 접속 중...`;
+                    conn = peer.connect(myId);
+                    setupConnection();
+                } else {
+                    statusDiv.innerText = "연결 오류: " + err.type;
+                }
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                isMyColorBlack = true;
+                myTurn = true;
+                setupConnection();
+                statusDiv.innerText = "상대방과 연결되었습니다! 게임 시작 (흑돌)";
+                gameActive = true;
+                drawBoard();
+            });
         }
 
-        // 다른 사람이 이 방에 들어왔을 때 (호스트 기준)
-        peer.on('connection', (connection) => {
-            conn = connection;
-            isMyColorBlack = true;
-            myTurn = true; // 선공
-            setupConnection();
-            statusDiv.innerText = "상대방과 연결되었습니다! 게임 시작 (당신은 흑돌)";
-            gameActive = true;
-            drawBoard();
-        });
-
         function setupConnection() {
+            const statusDiv = document.getElementById('status');
+
             conn.on('open', () => {
                 if (!isMyColorBlack) {
-                    statusDiv.innerText = "방에 입장했습니다! 상대방 턴을 기다리는 중 (당신은 백돌)";
+                    statusDiv.innerText = "방 입장 완료! 상대방 턴 대기 중 (백돌)";
                     myTurn = false;
                 }
                 gameActive = true;
@@ -153,11 +182,8 @@
             });
         }
 
-        // 오목판 그리기
         function drawBoard() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // 격자 그리기
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 1;
             for (let i = 0; i < BOARD_SIZE; i++) {
@@ -172,7 +198,6 @@
                 ctx.stroke();
             }
 
-            // 돌 그리기
             for (let y = 0; y < BOARD_SIZE; y++) {
                 for (let x = 0; x < BOARD_SIZE; x++) {
                     if (board[y][x] !== 0) {
@@ -180,8 +205,7 @@
                         ctx.arc(
                             CELL_SIZE / 2 + x * CELL_SIZE,
                             CELL_SIZE / 2 + y * CELL_SIZE,
-                            CELL_SIZE * 0.4,
-                            0, Math.PI * 2
+                            CELL_SIZE * 0.4, 0, Math.PI * 2
                         );
                         ctx.fillStyle = board[y][x] === 1 ? '#000' : '#fff';
                         ctx.fill();
@@ -192,7 +216,6 @@
             }
         }
 
-        // 클릭 이벤트 (돌 놓기)
         canvas.addEventListener('click', (e) => {
             if (!gameActive || !myTurn || !conn) return;
 
@@ -207,42 +230,22 @@
             board[y][x] = myColor;
             drawBoard();
 
-            // 상대방에게 데이터 전송
             conn.send({ type: 'move', x: x, y: y, color: myColor });
 
             if (checkWin(x, y, myColor)) {
-                statusDiv.innerText = "승리하셨습니다!";
+                document.getElementById('status').innerText = "승리하셨습니다!";
                 gameActive = false;
                 return;
             }
 
             myTurn = false;
-            statusDiv.innerText = "상대방 턴입니다...";
+            document.getElementById('status').innerText = "상대방 턴입니다...";
         });
 
-        // 승리 판정 함수
         function checkWin(x, y, color) {
-            const dirs = [
-                [1, 0], [0, 1], [1, 1], [1, -1]
-            ];
+            const dirs = [[1, 0], [0, 1], [1, 1], [1, -1]];
             for (let [dx, dy] of dirs) {
                 let count = 1;
                 for (let i = 1; i < 5; i++) {
                     let nx = x + dx * i, ny = y + dy * i;
-                    if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE || board[ny][nx] !== color) break;
-                    count++;
-                }
-                for (let i = 1; i < 5; i++) {
-                    let nx = x - dx * i, ny = y - dy * i;
-                    if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE || board[ny][nx] !== color) break;
-                    count++;
-                }
-                if (count >= 5) return true;
-            }
-            return false;
-        }
-
-        drawBoard();
-    </script>
-</body>
-</html>
+                    if (nx < 0
